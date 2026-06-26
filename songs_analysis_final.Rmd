@@ -1,0 +1,1923 @@
+---
+title: "spotify_analysis_BScMathematics_s5513286"
+output: html_document
+date: "2026-04-15"
+---
+
+Data summary and variable normalization
+```{r setup, include=FALSE}
+library(dplyr)
+library(moments)
+
+#Import dataset
+data_songs <- FINAL_
+
+#Convert mode to a categorical variable, with values 0 or 1
+data_songs$mode <- as.factor(data_songs$mode)
+
+
+# Check skewness of the response variable
+skewness(data_songs$popularity_beta)
+
+# Summary of data 
+data_songs  %>%
+  group_by(Genre)  %>%
+  summarise(
+    n = n(),
+    mean_popularity = mean(popularity_beta),
+    sd_popularity = sd(popularity_beta),
+    min = min(popularity_beta),
+    max = max(popularity_beta)
+  )
+
+#Transform mode into categorical variable with values 0 and 1
+data_songs$mode <- as.factor(data_songs$mode)
+
+#Loudness z-score normalization
+mu_1 <- mean(data_songs$loudness, na.rm = TRUE)
+sigma_1 <- sd(data_songs$loudness, na.rm = TRUE)
+loudness_z <- (data_songs$loudness - mu_1) / sigma_1
+
+
+#Tempo z-score normalization
+mu_2 <- mean(data_songs$tempo, na.rm = TRUE)
+sigma_2 <- sd(data_songs$tempo, na.rm = TRUE)
+tempo_z <- (data_songs$tempo - mu_2) / sigma_2
+
+# Store normalized values in the dataset
+data_songs$loudness_z <- loudness_z
+data_songs$tempo_z <- tempo_z
+
+```
+
+
+Outliers for each predictor
+```{r}
+# IQR Outlier Detection Function
+detect_outliers <- function(x) {
+  Q1 <- quantile(x, 0.25, na.rm = TRUE)
+  Q3 <- quantile(x, 0.75, na.rm = TRUE)
+  IQR_val <- Q3 - Q1
+  
+  lower_bound <- Q1 - 1.5 * IQR_val
+  upper_bound <- Q3 + 1.5 * IQR_val
+  
+  outliers <- x < lower_bound | x > upper_bound
+  
+  return(list(
+    Q1 = Q1,
+    Q3 = Q3,
+    IQR = IQR_val,
+    lower_bound = lower_bound,
+    upper_bound = upper_bound,
+    outliers = outliers,
+    n_outliers = sum(outliers, na.rm = TRUE),
+    n_total = sum(!is.na(x))
+  ))
+}
+
+# Apply to variables
+tempo_outlier_info <- detect_outliers(data_songs$tempo_z)
+loudness_outlier_info <- detect_outliers(data_songs$loudness_z)
+acousticness_outlier_info <- detect_outliers(data_songs$acousticness)
+speechiness_outlier_info <- detect_outliers(data_songs$speechiness)
+danceability_outlier_info <- detect_outliers(data_songs$danceability)
+valence_outlier_info <- detect_outliers(data_songs$valence)
+liveness_outlier_info <- detect_outliers(data_songs$liveness)
+energy_outlier_info <- detect_outliers(data_songs$energy)
+
+# Percentage function
+get_pct <- function(n_out, n_total) {
+  round(100 * n_out / n_total, 2)
+}
+
+# Results with percentages
+cat("Tempo outliers:", tempo_outlier_info$n_outliers,
+    "(", get_pct(tempo_outlier_info$n_outliers, tempo_outlier_info$n_total), "%)\n")
+
+cat("Loudness outliers:", loudness_outlier_info$n_outliers,
+    "(", get_pct(loudness_outlier_info$n_outliers, loudness_outlier_info$n_total), "%)\n")
+
+cat("Acousticness outliers:", acousticness_outlier_info$n_outliers,
+    "(", get_pct(acousticness_outlier_info$n_outliers, acousticness_outlier_info$n_total), "%)\n")
+
+cat("Speechiness outliers:", speechiness_outlier_info$n_outliers,
+    "(", get_pct(speechiness_outlier_info$n_outliers, speechiness_outlier_info$n_total), "%)\n")
+
+cat("Danceability outliers:", danceability_outlier_info$n_outliers,
+    "(", get_pct(danceability_outlier_info$n_outliers, danceability_outlier_info$n_total), "%)\n")
+
+cat("Liveness outliers:", liveness_outlier_info$n_outliers,
+    "(", get_pct(liveness_outlier_info$n_outliers, liveness_outlier_info$n_total), "%)\n")
+
+cat("Energy outliers:", energy_outlier_info$n_outliers,
+    "(", get_pct(energy_outlier_info$n_outliers, energy_outlier_info$n_total), "%)\n")
+
+cat("Valnce outliers:", valence_outlier_info$n_outliers,
+    "(", get_pct(valence_outlier_info$n_outliers, valence_outlier_info$n_total), "%)\n")
+```
+
+ICC of the null model
+```{r}
+library(glmmTMB)
+library(performance)
+
+# Null model including only the genre
+null_model <- glmmTMB(
+  popularity_beta ~ 1 + (1 | Genre),
+  data   = data_songs,
+  family = beta_family()
+)
+
+#ICC of the null model
+icc_null <- icc(null_model)
+print(icc_null)
+
+```
+
+Building Full Beta GLM and Full Beta BGLMM, followed by empirical justification of including random effects
+```{r}
+library(glmmTMB)
+
+# Beta Generalized Linear Model
+glm_beta_fixed <- glmmTMB(
+  popularity_beta ~
+    danceability +
+    energy       +
+    acousticness +
+    valence      +
+    speechiness  +
+    liveness    +
+    mode+
+    loudness_z+
+    tempo_z,
+  data   = data_songs,
+  family = beta_family()
+)
+
+#Full Beta Generalized Linear Mixed Model
+glmm_beta <- glmmTMB(
+  popularity_beta ~
+    danceability +
+    energy       +
+    acousticness +
+    valence      +
+    speechiness  +
+    liveness    +
+    mode+
+    loudness_z+
+    tempo_z+
+    (1 | Genre),
+  data   = data_songs,
+  family = beta_family(link = "logit")
+
+)
+summary(glmm_beta)
+
+#ICC of the Full BGLMM
+icc_full <- icc(glmm_beta)
+print(icc_full)
+
+#Model comparison between Full Beta GLM (including only fixed effects) and Full Beta GLMM (including both fixed and random effects)
+anova(glm_beta_fixed, glmm_beta)
+```
+Backward elimination using minimum AIC procedure
+```{r}
+#Backward elimination using minimum AIC procedure 
+
+library(MASS)
+
+drop1(glmm_beta, test = "Chisq")
+```
+```{r}
+#Step 1
+glmm_beta_energy <- glmmTMB(
+  popularity_beta ~
+    danceability +
+    acousticness +
+    valence      +
+    speechiness  +
+    liveness    +
+    mode+
+    loudness_z+
+    tempo_z+
+    (1 | Genre),   # random intercept: accounts for genre clustering
+  data   = data_songs,
+  family = beta_family(link = "logit")
+
+)
+drop1(glmm_beta_energy, test = "Chisq")
+```
+
+```{r}
+#Step 2
+glmm_beta_tempo <- glmmTMB(
+  popularity_beta ~
+    danceability +
+    acousticness +
+    speechiness  +
+    liveness    +
+    mode+
+    valence+
+    loudness_z+
+    (1 | Genre),   # random intercept: accounts for genre clustering
+  data   = data_songs,
+  family = beta_family(link = "logit")
+
+)
+drop1(glmm_beta_tempo, test = "Chisq")
+```
+
+
+```{r}
+#Step 3
+glmm_beta_loudness <- glmmTMB(
+  popularity_beta ~
+    danceability +
+    acousticness +
+    speechiness  +
+    mode+
+    valence+
+    liveness+
+    (1 | Genre),   
+  data   = data_songs,
+  family = beta_family(link = "logit")
+
+)
+drop1(glmm_beta_loudness, test = "Chisq")
+```
+
+
+```{r}
+# Reduced Beta GLMM
+glmm_beta_mode <- glmmTMB(
+  popularity_beta ~
+    danceability +
+    acousticness +
+    speechiness  +
+    liveness+
+    valence+
+    (1 | Genre),   # random intercept: accounts for genre clustering
+  data   = data_songs,
+  family = beta_family(link = "logit")
+
+)
+drop1(glmm_beta_mode, test = "Chisq")
+summary(glmm_beta_mode)
+```
+
+
+Three different Random Slope BGLMM are built with random slope for acousticness, liveness and speechiness respectively, which are the variables indetified having the most diverse relationship with popularity across genres. Using LRT we determine that only random slope for speechiness is significant to model fit.
+```{r}
+library(performance)
+
+# Random Slope BGLMM (random slope for acousticness)
+slope_acoust <- glmmTMB(
+  popularity_beta ~ danceability +
+    acousticness +
+    speechiness  +
+    valence+
+    liveness+
+    danceability+
+  (1 + acousticness|Genre), family=beta_family(), data=data_songs)
+
+# Random Slope BGLMM (random slope for liveness)
+slope_liveness <- glmmTMB(
+  popularity_beta ~ danceability +
+    acousticness +
+    speechiness  +
+    valence+
+    liveness+
+    danceability+
+  (1 + liveness|Genre), family=beta_family(), data=data_songs)
+
+#Random Slope BGLMM (random slope for speechiness) - RS BGLMM
+m_slope <- glmmTMB(
+  popularity_beta ~ danceability +
+    acousticness +
+    speechiness  +
+    valence+
+    liveness+
+    danceability+
+  (1 + speechiness|Genre), family=beta_family(), data=data_songs)
+summary(m_slope)
+
+anova(slope_acoust, glmm_beta_mode)
+anova(slope_liveness, glmm_beta_mode)
+anova(m_slope, glmm_beta_mode)
+
+```
+
+
+```{r}
+#Model comparisons 
+
+#Full BGLMM against Reduced BGLMM
+anova(glmm_beta, glmm_beta_red)
+
+#Reduced BGLMM against RS BGLMM
+anova(glmm_beta_red, m_slope, refit=FALSE)
+```
+
+
+```{r}
+#Coefficient of Determination R^2
+library(performance)
+
+# Full model
+r2_full <- r2(glmm_beta)
+r2_full
+
+# Reduced model
+r2_reduced <- r2(glmm_beta_mode)
+r2_reduced
+
+# Random slope model
+r2_slope <- r2(m_slope)
+r2_slope
+```
+
+Cross-validation for the Full, Reduced, Random Slope BGLMM
+```{r}
+#m times repated k-fold stratified Cross-Validation for Full, Reduced, Random Slope BGLMM
+
+library(caret) 
+library(glmmTMB) 
+library(lme4)
+
+# Metric function 
+compute_metrics <- function(y, y_hat) {
+  
+  valid <- is.finite(y) & is.finite(y_hat)
+  
+  if(sum(valid) == 0) {
+    return(c(MSE=NA, RMSE=NA, MAE=NA))
+  }
+  
+  y <- y[valid]
+  y_hat <- y_hat[valid]
+  
+  mse  <- mean((y - y_hat)^2)
+  rmse <- sqrt(mse)
+  mae  <- mean(abs(y - y_hat))
+  
+  return(c(MSE = mse, RMSE = rmse, MAE = mae))
+}
+
+# Stratified CV
+run_cv_stratified <- function(model_object, data, model_name) {
+  
+  all_results <- list()
+  counter <- 1
+  
+  data$Genre <- as.factor(data$Genre)
+  
+  form <- formula(model_object)
+  
+  for (rep in 1:n_repeats) {
+    set.seed(my_seed + rep)
+    
+    # Create stratified folds based on genre
+    folds <- createFolds(data$Genre, k = K, list = TRUE)
+    
+    for (k in 1:K) {
+      
+      test_idx  <- folds[[k]]
+      train_data <- data[-test_idx, ]
+      test_data  <- data[test_idx, ]
+      
+      res <- tryCatch({
+        
+        if(inherits(model_object, "glmmTMB")) {
+          model <- glmmTMB(
+            form,
+            data = train_data,
+            family = model_object$modelInfo$family
+          )
+        } else if(inherits(model_object, "lmerMod")) {
+          model <- lmer(form, data = train_data)
+        }
+        
+        # Fixed-effects predictions
+        y_hat <- predict(
+          model,
+          newdata = test_data,
+          type = "response",
+          re.form = NA
+        )
+        
+        y <- test_data$popularity_beta
+        
+        metrics <- compute_metrics(y, y_hat)
+        
+        data.frame(
+          Model = model_name,
+          Repeat = rep,
+          Fold = k,
+          t(metrics)
+        )
+        
+      }, error = function(e) {
+        data.frame(
+          Model = model_name,
+          Repeat = rep,
+          Fold = k,
+          MSE=NA, RMSE=NA, MAE=NA
+        )
+      })
+      
+      all_results[[counter]] <- res
+      counter <- counter + 1
+    }
+  }
+  
+  dplyr::bind_rows(all_results)
+}
+```
+
+
+```{r}
+# 10 times repeated stratified 10 fold CV for Full, Reduced, RS BGLMM
+
+# Simulation Parameters
+K <- 10
+n_repeats <- 10
+my_seed <- 42
+
+# Run CV 
+cv_full <- run_cv_stratified(
+  glmm_beta,          
+  data_songs,
+  "Full"
+)
+
+cv_reduced <- run_cv_stratified(
+  glmm_beta_mode,
+  data_songs,
+  "Reduced"
+)
+
+cv_slope <- run_cv_stratified(
+  m_slope,
+  data_songs,
+  "Random_Slope"
+)
+
+# Combine and summarize
+final_summary <- bind_rows(cv_full, cv_reduced, cv_slope) %>%
+  group_by(Model) %>%
+  summarise(
+    across(
+      c(MSE, RMSE, MAE),
+      list(
+        mean = ~mean(.x, na.rm = TRUE),
+        sd   = ~sd(.x, na.rm = TRUE)
+      )
+    ),
+    .groups = "drop"
+  )
+
+print(final_summary)
+```
+
+
+Monte Carlo Simulation Study
+```{r}
+#Monte Carlo Simulation Study
+library(glmmTMB) 
+library(lme4)
+library(performance)
+
+# Define Gaussian GLMM
+glmm_gauss<- glmmTMB(
+  popularity_beta ~
+    danceability +
+    acousticness +
+    valence +
+    speechiness +
+    liveness +
+    (1 | Genre),
+  data   = data_songs,
+  family = gaussian(link = "identity")
+)
+ 
+
+#PHASE I
+
+# 1. Set the baseline model 
+B <- 100 
+n_obs <- 2096
+n_genres <- 8
+
+# Fixed Effects
+beta_int <- 0.817
+beta_dance <- 0.141
+beta_acoustic <- 0.213
+beta_speech <- -0.553
+beta_valence <- 0.115
+beta_live <- -0.144
+
+# Variance Components
+sigma_genre <- 0.1635  
+phi_true <- 13.5       
+
+# 2. Simulation Loop
+results <- vector("list", B)
+
+for(i in 1:B) {
+
+  
+
+  # A. Generate predictors
+
+  sim_data <- data.frame(
+    Genre = factor(rep(1:n_genres, length.out = n_obs)),
+    danceability = rnorm(n_obs),
+    acousticness = rnorm(n_obs),
+    speechiness  = rnorm(n_obs),
+    valence      = rnorm(n_obs),
+    liveness     = rnorm(n_obs)
+
+  )
+
+  # B. Random effects
+  genre_effects <- rnorm(n_genres, 0, sigma_genre)
+  sim_data$u_i <- genre_effects[as.numeric(sim_data$Genre)]
+
+  
+
+  # C. Linear predictor
+  sim_data$eta <- with(sim_data,
+    beta_int +
+    beta_dance * danceability +
+    beta_acoustic * acousticness +
+    beta_speech * speechiness +
+    beta_valence * valence +
+    beta_live * liveness +
+    u_i
+
+  )
+
+  sim_data$mu <- 1 / (1 + exp(-sim_data$eta))
+
+  
+
+  # D. Generate Beta response
+  sim_data$y <- rbeta(
+    n_obs,
+    shape1 = sim_data$mu * phi_true,
+    shape2 = (1 - sim_data$mu) * phi_true
+
+  )
+
+  
+
+  # E. Fit models
+  m_beta <- glmmTMB(
+
+    y ~ danceability + acousticness + speechiness +valence + liveness + (1|Genre),
+  data = sim_data,
+  family = beta_family(link = "logit"))
+
+  m_gauss <- lmer(y ~ danceability + acousticness + speechiness +valence + liveness + (1|Genre),
+  data = sim_data)
+
+
+  # F. Predictions
+  preds_gauss <- predict(m_gauss)
+
+  
+
+  # G. Store results
+  results[[i]] <- data.frame(
+    est_beta_s = fixef(m_beta)$cond["speechiness"],
+    est_gauss_s = fixef(m_gauss)["speechiness"],
+    
+    est_beta_a = fixef(m_beta)$cond["acousticness"],
+    est_gauss_a = fixef(m_gauss)["acousticness"],
+    
+    est_beta_v = fixef(m_beta)$cond["valence"],
+    est_gauss_v = fixef(m_gauss)["valence"],
+    
+    est_beta_d = fixef(m_beta)$cond["danceability"],
+    est_gauss_d = fixef(m_gauss)["danceability"],
+    
+    est_beta_l = fixef(m_beta)$cond["liveness"],
+    est_gauss_l = fixef(m_gauss)["liveness"],
+    
+    inadmissible = mean(preds_gauss < 0 | preds_gauss > 1),
+    singular = isSingular(m_gauss)
+
+  )
+
+}
+
+results_final <- do.call(rbind, results)
+
+results_final <- bind_rows(results)
+
+# PHASE I Summary
+phase1_summary <- results_final %>%
+  summarise(
+    bias_beta_speech = mean(est_beta_s - beta_speech),
+    bias_gauss_speech = mean(est_gauss_s - beta_speech),
+    bias_beta_acoust = mean(est_beta_a - beta_acoustic),
+    bias_gauss_acoust = mean(est_gauss_a - beta_acoustic),
+    bias_beta_vale = mean(est_beta_v - beta_valence),
+    bias_gauss_vale = mean(est_gauss_v - beta_valence),
+    bias_beta_dance = mean(est_beta_d - beta_dance),
+    bias_gauss_dance = mean(est_gauss_d - beta_dance),
+    bias_beta_live = mean(est_beta_l - beta_live),
+    bias_gauss_live = mean(est_gauss_l - beta_live),
+    
+    rmse_beta_speech = sqrt(mean((est_beta_s - beta_speech)^2)),
+    rmse_gauss_speech = sqrt(mean((est_gauss_s - beta_speech)^2)),
+    rmse_beta_acoust = sqrt(mean((est_beta_a - beta_acoustic)^2)),
+    rmse_gauss_acoust = sqrt(mean((est_gauss_a - beta_acoustic)^2)),
+    rmse_beta_vale = sqrt(mean((est_beta_v - beta_valence)^2)),
+    rmse_gauss_vale = sqrt(mean((est_gauss_v - beta_valence)^2)),
+    rmse_beta_dance = sqrt(mean((est_beta_d - beta_dance)^2)),
+    rmse_gauss_dance = sqrt(mean((est_gauss_d - beta_dance)^2)),
+    rmse_beta_live = sqrt(mean((est_beta_l - beta_live)^2)),
+    rmse_gauss_live = sqrt(mean((est_gauss_l - beta_live)^2)),
+    
+    inadmissible_pct = mean(inadmissible) * 100,
+    singularity_rate = mean(singular) * 100
+  )
+
+print(phase1_summary)
+```
+
+
+```{r}
+library(glmmTMB)
+library(lme4)
+
+# PHASE II
+
+control_params <- lmerControl(
+  optimizer = "bobyqa",
+  optCtrl = list(maxfun = 1e4)
+)
+
+# Create grid
+B <- 20
+intercept_seq <- seq(-5, 5, by = 0.5)
+
+failure_results <- data.frame()
+
+for (b0 in intercept_seq) {
+
+  inadmissible_vec <- numeric(B)
+  singular_vec     <- numeric(B)
+  mean_y_vec       <- numeric(B)
+
+  for (b in 1:B) {
+
+    # A. Generate data
+    sim_data$eta <- b0 +
+      beta_dance * sim_data$danceability +
+      beta_acoustic * sim_data$acousticness +
+      beta_speech * sim_data$speechiness +
+      beta_valence * sim_data$valence +
+      beta_live * sim_data$liveness +
+      sim_data$u_i
+
+    sim_data$mu <- 1 / (1 + exp(-sim_data$eta))
+
+    sim_data$y <- rbeta(
+      nrow(sim_data),
+      sim_data$mu * phi_true,
+      (1 - sim_data$mu) * phi_true
+    )
+
+    # Enforce (0,1) using beta transformation
+    n <- nrow(sim_data)
+    sim_data$y <- (sim_data$y * (n - 1) + 0.5) / n
+
+    # B. Fit models
+    m_beta_temp <- glmmTMB(
+      y ~ danceability + acousticness + speechiness +
+        valence + liveness + (1 | Genre),
+      data = sim_data,
+      family = beta_family(link = "logit")
+    )
+
+    m_gauss_temp <- lmer(
+      y ~ danceability + acousticness + speechiness +
+        valence + liveness + (1 | Genre),
+      data = sim_data,
+      control = control_params
+    )
+
+    # C. Predictions
+    preds_gauss <- predict(m_gauss_temp)
+
+    # D. Failure metrics
+    out_low  <- sum(preds_gauss < 0)
+    out_high <- sum(preds_gauss > 1)
+
+    inadmissible_vec[b] <- (out_low + out_high) / length(preds_gauss) * 100
+    singular_vec[b]     <- as.numeric(isSingular(m_gauss_temp))
+    mean_y_vec[b]       <- mean(sim_data$y)
+  }
+
+  # E. Results
+  failure_results <- rbind(failure_results, data.frame(
+    intercept        = b0,
+    mean_popularity  = mean(mean_y_vec),
+    inadmissible_pct = mean(inadmissible_vec),
+    singularity_rate = mean(singular_vec)
+  ))
+}
+
+print(failure_results)
+```
+
+
+Cross-validation of the Gaussian GLMM
+```{r}
+library(dplyr)
+library(caret)
+library(glmmTMB)
+
+#m times repeated k-fold stratified cross validation for Gaussian model
+#Metric function
+compute_metrics <- function(y, y_hat) {
+  
+  valid <- is.finite(y) & is.finite(y_hat)
+  
+  if(sum(valid) == 0) {
+    return(c(MSE=NA, RMSE=NA, MAE=NA))
+  }
+  
+  y <- y[valid]
+  y_hat <- y_hat[valid]
+  
+  mse  <- mean((y - y_hat)^2)
+  rmse <- sqrt(mse)
+  mae  <- mean(abs(y - y_hat))
+  
+  return(c(MSE = mse, RMSE = rmse, MAE = mae))
+}
+
+#Gaussian Stratified CV
+run_cv_gaussian <- function(model_object, data, model_name) {
+  
+  all_results <- list()
+  counter <- 1
+  
+  data$Genre <- as.factor(data$Genre)
+  form <- formula(model_object)
+  
+  for (rep in 1:n_repeats) {
+    set.seed(my_seed + rep)
+    
+    folds <- createFolds(data$Genre, k = K, list = TRUE)
+    
+    for (k in 1:K) {
+      
+      test_idx  <- folds[[k]]
+      train_data <- data[-test_idx, ]
+      test_data  <- data[test_idx, ]
+      
+      res <- tryCatch({
+        
+        # Refit Gaussian GLMM
+        model <- glmmTMB(
+          form,
+          data = train_data,
+          family = gaussian()
+        )
+        
+        # Predictions for fixed effects only
+        y_hat <- predict(
+          model,
+          newdata = test_data,
+          type = "response",
+          re.form = NA   
+        )
+        
+        y <- test_data$popularity_beta
+        
+        metrics <- compute_metrics(y, y_hat)
+        
+        data.frame(
+          Model = model_name,
+          Repeat = rep,
+          Fold = k,
+          t(metrics)
+        )
+        
+      }, error = function(e) {
+        data.frame(
+          Model = model_name,
+          Repeat = rep,
+          Fold = k,
+          MSE=NA, RMSE=NA, MAE=NA
+        )
+      })
+      
+      all_results[[counter]] <- res
+      counter <- counter + 1
+    }
+  }
+  
+  bind_rows(all_results)
+}
+```
+
+
+```{r}
+# 10 times repeated 10 fold stratified cross validation for the Gaussian model
+K <- 10
+n_repeats <- 10
+my_seed <- 42
+
+cv_gaussian <- run_cv_gaussian(
+  glmm_gauss,
+  data_songs,
+  "Gaussian GLMM"
+)
+
+#Results of CV for the Gaussian GLMM
+gaussian_summary <- cv_gaussian %>%
+  group_by(Model) %>%
+  summarise(
+    MSE_mean  = mean(MSE, na.rm = TRUE),
+    MSE_sd    = sd(MSE, na.rm = TRUE),
+    RMSE_mean = mean(RMSE, na.rm = TRUE),
+    RMSE_sd   = sd(RMSE, na.rm = TRUE),
+    MAE_mean  = mean(MAE, na.rm = TRUE),
+    MAE_sd    = sd(MAE, na.rm = TRUE)
+  )
+
+print(gaussian_summary)
+```
+
+
+Rank-Based Chart Evaluation
+```{r}
+#Rank Chart Based Evaluation for the Reduced and RS BGLMMs
+
+library(dplyr)
+data_songs <- data_songs %>%
+  mutate(
+    pred_beta_reduced = predict(glmm_beta_mode,  type = "response"),
+    pred_beta_slope   = predict(m_slope, type = "response")
+  )
+
+master_predictions <- data_songs %>%
+  select(WeekID, `Week Position`,
+         pred_beta_reduced,
+         pred_beta_slope)
+
+# A. Weekly rank correlations
+
+weekly_rank_results <- master_predictions %>%
+  filter(!is.na(`Week Position`)) %>%
+  group_by(WeekID) %>%
+  summarise(
+    n_tracks = n(),
+
+    # Spearman 
+    spearman_beta_reduced = -cor(pred_beta_reduced, `Week Position`,
+                                method = "spearman", use = "complete.obs"),
+    spearman_beta_slope = -cor(pred_beta_slope, `Week Position`,
+                              method = "spearman", use = "complete.obs"),
+
+    # Kendall 
+    kendall_beta_reduced = -cor(pred_beta_reduced, `Week Position`,
+                               method = "kendall", use = "complete.obs"),
+    kendall_beta_slope = -cor(pred_beta_slope, `Week Position`,
+                             method = "kendall", use = "complete.obs"),
+
+    .groups = "drop"
+  )
+
+
+# B. Filter weeks with less than 5 songs
+weekly_rank_results_filtered <- weekly_rank_results %>%
+  filter(n_tracks >= 5)
+
+
+# C. Summary
+global_rank_summary <- weekly_rank_results_filtered %>%
+  summarise(
+    # Means
+    mean_spearman_beta_reduced = mean(spearman_beta_reduced, na.rm = TRUE),
+    mean_spearman_beta_slope = mean(spearman_beta_slope, na.rm = TRUE),
+    
+    mean_kendall_beta_reduced = mean(kendall_beta_reduced, na.rm = TRUE),
+    mean_kendall_beta_slope = mean(kendall_beta_slope, na.rm = TRUE),
+
+    # Standard deviations 
+    sd_spearman_beta_reduced = sd(spearman_beta_reduced, na.rm = TRUE),
+    sd_spearman_beta_slope = sd(spearman_beta_slope, na.rm = TRUE),
+
+    sd_kendall_beta_reduced = sd(kendall_beta_reduced, na.rm = TRUE),
+    sd_kendall_beta_slope = sd(kendall_beta_slope, na.rm = TRUE),
+
+  )
+
+print(global_rank_summary)
+```
+
+
+Plots 
+
+Figure 1
+```{r}
+#Distibution of Spotify popularity score Plot
+ggplot(data_songs, aes(x = popularity_beta)) +
+  geom_histogram(aes(y = ..density..),
+                 bins  = 30,
+                 fill  = "deepskyblue3",
+                 color = "black",
+                 alpha = 0.7) +
+  geom_density(color    = "indianred3",
+               linewidth = 0.7) +
+  labs(
+    title = "Distribution of Spotify Popularity Score",
+    x     = "Popularity transformed (0,1)",
+    y     = "Density"
+  ) +
+  theme_minimal() +
+  theme(
+    plot.title       = element_text(hjust = 0.5, face = "bold", size = 15),
+
+    axis.text.x      = element_text(color = "black", size = 11, margin = margin(b = 15)),
+    axis.text.y      = element_text(color = "black", size = 11),
+    axis.title       = element_text(color = "black", face = "bold", size=13),
+
+    panel.grid.major = element_line(color = "lightgrey"),
+    panel.grid.minor = element_line(color = NA),
+
+    panel.background = element_rect(fill = "#f7f7f7", color = NA),
+    plot.background  = element_rect(fill = "#f7f7f7", color = NA)
+  )
+
+ggsave("popularity_plot.png", width = 8, height = 6, dpi = 300, bg = "#f7f7f7")
+
+```
+
+
+Figure 2
+```{r}
+#Popularity Distribution by Genre Plot
+
+library(ggplot2)
+ggplot(data_songs, aes(x = Genre, y = popularity_beta, fill = Genre)) +
+  geom_boxplot(color = "black") +
+  scale_fill_manual(values = c(
+    "Pop"            = "aquamarine2",
+    "Electronic"     = "coral",
+    "Hip hop/ Rap"   = "chartreuse",
+    "Country"        = "#9467bd",
+    "Latin"          = "deeppink",
+    "R&B"            = "darkorange",
+    "Rock"           = "cadetblue",
+    "Easy Listening" = "yellow1"
+  )) +
+  labs(
+    title = "Popularity Distribution by Genre",
+    x     = "Genre",
+    y     = "Popularity transformed (0-1)"
+  ) +
+  theme_minimal() +
+  theme(
+    plot.title        = element_text(hjust = 0.5, face = "bold", size = 15),
+
+    axis.text.x       = element_text(color = "black", size = 11, margin = margin(b = 15), angle=20),
+    axis.text.y       = element_text(color = "black", size = 11),
+    axis.title        = element_text(color = "black", face = "bold", size=13),
+
+    legend.position   = "none",
+
+    panel.grid.major  = element_line(color = "lightgrey"),
+    panel.grid.minor  = element_line(color = NA),
+
+    panel.background  = element_rect(fill = "#f7f7f7", color = NA),
+    plot.background   = element_rect(fill = "#f7f7f7", color = NA)
+  )
+
+ggsave(
+  filename = "genre_popularity_distributions.png",
+  width    = 10,
+  height   = 6,
+  dpi      = 300,          
+  bg       = "#f7f7f7"     
+)
+```
+
+
+Figure 3 (only the scatter plot of speechiness against popularity is presented in the paper)
+```{r}
+library(ggplot2)
+
+#Custom theme for scatterplots of audio features vs popularity across genres
+theme_scatter<-theme(
+    plot.title = element_text(hjust = 0.5, face = "bold", size = 15),
+    
+    axis.text.x = element_text(color = "black", size = 11, margin = margin(b = 15)),
+    axis.text.y = element_text(color = "black", size = 11),
+    axis.title = element_text(color = "black", face = "bold", size=13),
+    
+    strip.text = element_text(face = "bold", size = 11, color = "black"),
+    
+    panel.grid.major = element_line(color = "lightgrey"),
+    panel.grid.minor = element_line(color = NA),
+    
+    panel.background = element_rect(fill = "#f7f7f7", color = NA),
+    plot.background = element_rect(fill = "#f7f7f7", color = NA),
+    
+    strip.background = element_rect(fill = "#e8e8e8", color = NA)
+  )
+
+#Scatterplots of speechiness vs popularity across genres
+
+ggplot(data_songs, aes(x = speechiness, y = popularity_beta)) +
+  geom_point(alpha = 0.3, size = 1, color = "deepskyblue3") +
+  geom_smooth(method = "lm", color = "indianred1", se = FALSE) +
+  facet_wrap(~ Genre, ncol = 4) +
+  labs(
+    title = "Popularity vs Speechiness for each genre",
+    x = "Speechiness",
+    y = "Popularity transformed (0–1)"
+  ) +
+  theme_minimal() +
+  theme_scatter
+  
+
+#ggsave("speechiness_popularity.png", width = 10, height = 6)
+
+#Scatterplots of danceability vs popularity across genres
+ggplot(data_songs, aes(x = danceability, y = popularity_beta)) +
+  geom_point(alpha = 0.3, size = 1, color = "deepskyblue3") +
+  geom_smooth(method = "lm", color = "indianred1", se = FALSE) +
+  facet_wrap(~ Genre, ncol = 4) +
+  labs(
+    title = "Popularity vs Danceability for each genre",
+    x = "Danceability",
+    y = "Popularity transformed (0–1)"
+  ) +
+  theme_minimal() +
+  theme_scatter
+
+#Scatterplots of acousticness vs popularity across genres
+ggplot(data_songs, aes(x = acousticness, y = popularity_beta)) +
+  geom_point(alpha = 0.3, size = 1, color = "deepskyblue3") +
+  geom_smooth(method = "lm", color = "indianred1", se = FALSE) +
+  facet_wrap(~ Genre, ncol = 4) +
+  labs(
+    title = "Popularity vs Acousticness for each genre",
+    x = "Acousticness",
+    y = "Popularity transformed (0–1)"
+  ) +
+  theme_minimal() +
+  theme_scatter
+
+#Scatterplots of valence vs popularity across genres
+ggplot(data_songs, aes(x = valence, y = popularity_beta)) +
+  geom_point(alpha = 0.3, size = 1, color = "deepskyblue3") +
+  geom_smooth(method = "lm", color = "indianred1", se = FALSE) +
+  facet_wrap(~ Genre, ncol = 4) +
+  labs(
+    title = "Popularity vs Valence for each genre",
+    x = "Valence",
+    y = "Popularity transformed (0–1)"
+  ) +
+  theme_minimal() +
+  theme_scatter
+
+#Scatterplots of liveness vs popularity across genres
+ggplot(data_songs, aes(x = liveness, y = popularity_beta)) +
+  geom_point(alpha = 0.3, size = 1, color = "deepskyblue3") +
+  geom_smooth(method = "lm", color = "indianred1", se = FALSE) +
+  facet_wrap(~ Genre, ncol = 4) +
+  labs(
+    title = "Popularity vs Liveness for each genre",
+    x = "Liveness",
+    y = "Popularity transformed (0–1)"
+  ) +
+  theme_minimal() +
+  theme_scatter
+
+```
+
+
+Figure 4
+```{r}
+# Decompose the variance into Fixed, Random, and Residual
+r2_long <- data.frame(
+  Model = c("Full", "Reduced", "Random Slope"),
+  Fixed = c(r2_full$R2_marginal, r2_reduced$R2_marginal, r2_slope$R2_marginal),
+  Random = c(r2_full$R2_conditional - r2_full$R2_marginal, 
+             r2_reduced$R2_conditional - r2_reduced$R2_marginal, 
+             r2_slope$R2_conditional - r2_slope$R2_marginal),
+  Residual = c(1 - r2_full$R2_conditional, 
+               1 - r2_reduced$R2_conditional, 
+               1 - r2_slope$R2_conditional)
+) %>%
+  # Pivot to long format for ggplot
+  pivot_longer(
+    cols = c(Fixed, Random, Residual), 
+    names_to = "Component", 
+    values_to = "value"
+  ) %>%
+  mutate(label = percent(value, accuracy = 0.1))
+
+# Variance Decomposiiton of Popularity Plot
+ggplot(r2_long, aes(x = Model, y = value, fill = Component)) +
+  geom_bar(stat = "identity") +
+  geom_text(aes(label = label),
+            position = position_stack(vjust = 0.5),
+            size = 4,
+            fontface = "bold") + # Fixed 'face' to 'fontface'
+  scale_y_continuous(labels = percent_format(), limits = c(0, 1)) +
+  scale_fill_manual(values = c("Fixed" = "deepskyblue3", 
+                               "Random" = "olivedrab3", 
+                               "Residual" = "indianred1")) +
+  labs(
+    title = "Variance Decomposition of GLMMs",
+    y = "Percentage",
+    fill = "Component"
+  ) +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(hjust = 0.5, face = "bold", size = 15), 
+    axis.text.x = element_text(color = "black", size = 11, margin = margin(b = 15)),        
+    axis.text.y = element_text(color = "black", size = 11),        
+    axis.title = element_text(color = "black", face = "bold", size = 13),
+    legend.background = element_rect(color = "black", linewidth = 0.5, fill = "#f7f7f7"),
+    legend.text = element_text(size = 10),
+    legend.title = element_text(face = "bold"),
+    panel.grid.major = element_line(color = NA),
+    panel.grid.minor = element_line(color = NA),
+    panel.background = element_rect(fill = "#f7f7f7", color = NA),
+    plot.background = element_rect(fill = "#f7f7f7", color = NA)
+  )
+
+
+ggsave("variance_decomp.png", width = 8, height = 6, dpi = 300, bg = "#f7f7f7")
+```
+
+
+Figure 5
+```{r}
+library(ggplot2)
+library(tidyr)
+library(dplyr)
+
+plot_data_all <- results %>%
+  select(est_beta_s, est_gauss_s,
+         est_beta_a, est_gauss_a) %>%
+  pivot_longer(cols = everything(),
+               names_to = "Variable",
+               values_to = "Estimate") %>%
+  mutate(
+    Model = ifelse(grepl("beta", Variable), "Beta GLMM", "Gaussian GLMM"),
+    Predictor = ifelse(grepl("_s", Variable), "Speechiness", "Acousticness")
+  )
+
+# True values dataframe
+true_vals <- data.frame(
+  Predictor = c("Speechiness", "Acousticness"),
+  true = c(beta_speech, beta_acoustic)
+)
+
+#Distribution of Coefficient Estimates Across Simulations Plot
+ggplot(plot_data_all, aes(x = Estimate, fill = Model, color = Model, linetype = Predictor)) +
+  geom_density(alpha = 0.4) +
+  geom_vline(data = true_vals,
+             aes(xintercept = true, linetype = Predictor),
+             size = 1,
+             color = "black") +
+  scale_fill_manual(values = c(
+    "Beta GLMM"     = "deepskyblue3",
+    "Gaussian GLMM" = "indianred1"
+  )) +
+  scale_color_manual(values = c(
+    "Beta GLMM"     = "deepskyblue3",
+    "Gaussian GLMM" = "indianred1"
+  )) +
+  scale_linetype_manual(values = c(
+    "Speechiness"  = "solid",
+    "Acousticness" = "dashed"
+  )) +
+  labs(
+    title = "Distribution of Coefficient Estimates Across Simulations",
+    x = "Estimated Coefficient",
+    y = "Density",
+    fill = "Model",
+    color = "Model",
+    linetype = "Predictor"
+  ) +
+  theme_minimal(base_size = 14) +
+  theme(
+    plot.title = element_text(hjust = 0.5, face = "bold", size = 15),
+    axis.text.x = element_text(color = "black", size = 11, margin = margin(b = 15)),
+    axis.text.y = element_text(color = "black", size = 11),
+    axis.title = element_text(color = "black", face = "bold", size=13),
+    legend.background = element_rect(color = "black", linewidth = 0.5, fill = "#f7f7f7"),
+    legend.key = element_rect(fill = NA, color = NA),
+    legend.text = element_text(size = 12),
+    legend.title = element_text(face = "bold"),
+    legend.box = "horizontal",          # <-- changed from "vertical"
+    legend.spacing.x = unit(0.5, "cm"),
+    legend.margin = margin(6, 6, 6, 6),
+          legend.position = c(0.5, -0.24),
+                              legend.direction="horizontal",
+    # x=0 is far left, adjust y as needed
+    plot.margin = margin(10, 10, 60, 10),
+    panel.grid.major = element_line(color = "lightgrey"),
+    panel.grid.minor = element_line(color = NA),
+    panel.background = element_rect(fill = "#f7f7f7", color = NA),
+    plot.background = element_rect(fill = "#f7f7f7", color = NA)
+  )
+ggsave("coefficient_distributions_combined.png", width = 9, height = 5)
+
+```
+
+Figure 6
+```{r}
+#Simulated Beta Response Distributions Plot
+
+ggplot(demo_df, aes(x = y, fill = label, colour = label)) +
+  geom_density(alpha = 0.20, linewidth = 0.85) +
+  geom_vline(
+    data      = vlines_df,
+    aes(xintercept = m, colour = label),
+    linetype  = "dashed",
+    linewidth = 0.75
+  ) +
+  scale_x_continuous(limits = c(0, 1), breaks = seq(0, 1, 0.2)) +
+  scale_fill_manual(values = c(
+    "#e41a1c", "#ff7f00", "#4daf4a", "#377eb8", "#984ea3"
+  )) +
+  scale_colour_manual(values = c(
+    "#e41a1c", "#ff7f00", "#4daf4a", "#377eb8", "#984ea3"
+  )) +
+  labs(
+    title  = "Simulated Beta Response Distributions",
+    x      = "Popularity score (y)",
+    y      = "Density",
+    fill   = NULL, 
+    colour = NULL   
+  ) +
+  guides(
+    fill   = guide_legend(ncol = 3),   
+    colour = guide_legend(ncol = 3)
+  ) +
+  theme_minimal() +
+  theme(
+    plot.title        = element_text(hjust = 0.5, face = "bold", size = 14),
+    axis.text.x       = element_text(color = "black", size = 10, margin = margin(b = 15)),
+    axis.text.y       = element_text(color = "black", size = 10),
+    axis.title        = element_text(color = "black", face = "bold"),
+    legend.background = element_rect(color = "black", linewidth = 0.5, fill = "#f7f7f7"),
+    legend.text       = element_text(size = 10),
+    legend.title      = element_text(face = "bold"),
+    legend.position   = "bottom",
+    panel.grid.major  = element_line(color = "lightgrey"),
+    panel.grid.minor  = element_line(color = NA),
+    panel.background  = element_rect(fill = "#f7f7f7", color = NA),
+    plot.background   = element_rect(fill = "#f7f7f7", color = NA)
+  )
+
+ggsave(
+  filename = "simulated_distributions.png",
+  width    = 8,
+  height   = 5,
+  dpi      = 300,          
+  bg       = "#f7f7f7"     
+)
+
+```
+
+
+Figure 7
+```{r}
+library(dplyr)
+library(ggplot2)
+
+#Failure criteria for Gaussian GLMM
+failure_results <- failure_results %>%
+  mutate(
+    fail_flag = inadmissible_pct > 5 | singularity_rate > 10
+  )
+
+#Gaussian GLMM Percentage of Inadmissible Predictions and Singularity Rate
+
+ggplot(failure_results, aes(x = intercept)) +
+  geom_line(aes(y = inadmissible_pct, color = "Inadmissible predictions (%)"), size = 1.2) +
+  geom_point(aes(y = inadmissible_pct, color = "Inadmissible predictions (%)"), size = 2) +
+  
+  # Singularity line + points
+  geom_line(aes(y = singularity_rate, color = "Singularity Rate (%)"), size = 1.2) +
+  geom_point(aes(y = singularity_rate, color = "Singularity Rate (%)"), size = 2) +
+  geom_hline(yintercept = 5, linetype = "dashed", color = "black") +
+  geom_vline(xintercept = c(-4, 4), linetype = "dotted", color = "black") +
+  
+  scale_color_manual(values = c(
+    "Inadmissible predictions (%)" = "indianred1",
+    "Singularity Rate (%)" = "deepskyblue3"
+  )) +
+  labs(
+    title = "Gaussian GLMM Failure under Increasing Skewness",
+    x = bquote(bold("Gobal fixed intercept β"[bold("0")])),
+    y = "Percentage (%)",
+    color = NULL
+  ) +
+  scale_y_continuous(
+    limits = c(0, 26),
+    breaks = seq(0, 26, by = 5)
+  )+
+  
+  theme_minimal() +
+  theme(
+    plot.title = element_text(hjust = 0.5, face = "bold", size = 15),
+    
+    axis.text.x = element_text(color = "black", size = 11, margin = margin(b = 15)),
+    axis.text.y = element_text(color = "black", size = 11),
+    axis.title = element_text(color = "black", face = "bold", size=13),
+    
+    legend.background = element_rect(color = "black", linewidth = 0.5, fill = "#f7f7f7"),
+    legend.text = element_text(size = 12),
+    legend.title = element_text(face = "bold"),
+    legend.position   = "bottom",
+    
+    panel.grid.major = element_line(color = "lightgrey"),
+    panel.grid.minor = element_line(color = NA),
+    
+    panel.background = element_rect(fill = "#f7f7f7", color = NA),
+    plot.background = element_rect(fill = "#f7f7f7", color = NA)
+  )
+
+ggsave("glmm_failure.png", width = 8, height = 5)
+
+
+```
+
+
+Figure 8
+```{r}
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+
+weekly_long <- weekly_rank_results %>%
+  filter(n_tracks >= 5) %>%
+  pivot_longer(
+    cols = c(spearman_beta_reduced, spearman_beta_slope),
+    names_to = "Model",
+    values_to = "Spearman_Rho"
+  ) %>%
+  mutate(
+    Model = recode(Model,
+                   spearman_beta_reduced = "Reduced BGLMM",
+                   spearman_beta_slope   = "RS BGLMM")
+  )
+
+ggplot(weekly_long, aes(x = Model, y = Spearman_Rho, fill = Model, color = Model)) +
+  geom_violin(alpha = 0.3,
+              draw_quantiles = c(0.25, 0.75),
+              linetype = "dotted") +
+  geom_boxplot(width = 0.15,
+               fill = "white",
+               outlier.alpha = 0.4,
+               outlier.size = 1) +
+  stat_summary(fun = mean,
+               geom = "point",
+               shape = 23,
+               size = 3,
+               fill = "black") +
+  geom_hline(yintercept = 0,
+             linetype = "dashed",
+             color = "grey50") +
+  scale_fill_manual(values = c(
+    "Reduced BGLMM" = "deepskyblue3",
+    "RS BGLMM"      = "indianred1"
+  )) +
+  scale_color_manual(values = c(
+    "Reduced BGLMM" = "deepskyblue3",
+    "RS BGLMM"      = "indianred1"
+  )) +
+  labs(
+    x     = "Model Specification",
+    y     = expression(paste("Spearman's ", hat(rho)[t])),
+    title = "Distribution of Weekly Rank Correlations"
+  ) +
+  theme_minimal(base_size = 14) +
+  theme(
+    plot.title = element_text(hjust = 0.5, face = "bold", size = 15),
+
+    axis.text.x  = element_text(color = "black", size = 10, margin = margin(b = 15)),
+    axis.text.y  = element_text(color = "black", size = 10),
+    axis.title   = element_text(color = "black", face = "bold"),
+
+    legend.position = "none",
+
+    
+    panel.grid.major = element_line(color = "lightgrey"),
+    panel.grid.minor = element_line(color = NA),
+
+    panel.background = element_rect(fill = "#f7f7f7", color = NA),
+    plot.background  = element_rect(fill = "#f7f7f7", color = NA)
+  )
+
+ggsave("weekly_rank_correlations.png", width = 7, height = 5)
+```
+
+
+Figure 9
+```{r}
+#Fitted vs Residual Plots
+
+#Full
+ggplot(data.frame(
+  fitted = fitted(glmm_beta),
+  residuals = residuals(glmm_beta)
+), aes(x = fitted, y = residuals)) +
+  
+  geom_point(alpha = 19, color = "cornflowerblue") +
+  geom_smooth(method = "lm", color = "black", se = FALSE) +
+  
+  labs(
+    title = "Fitted vs Residuals (Full BGLMM)",
+    x = "Fitted values",
+    y = "Residuals"
+  ) +
+  
+  my_theme
+
+#Gaussian
+ggplot(data.frame(
+  fitted = fitted(glmm_gauss),
+  residuals = residuals(glmm_gauss)
+), aes(x = fitted, y = residuals)) +
+  
+  geom_point(alpha = 19, color = "cornflowerblue") +
+  geom_smooth(method = "lm", color = "black", se = FALSE) +
+  
+  labs(
+    title = "Fitted vs Residuals (Gaussian GLMM)",
+    x = "Fitted values",
+    y = "Residuals"
+  ) +
+  
+  my_theme
+ggsave("resgauss.png", width = 8, height = 6, dpi = 300, bg = "#f7f7f7")
+
+#Reduced
+ggplot(data.frame(
+  fitted = fitted(glmm_beta_mode),
+  residuals = residuals(glmm_beta_mode)
+), aes(x = fitted, y = residuals)) +
+  
+  geom_point(alpha = 19, color = "cornflowerblue") +
+  geom_smooth(method = "lm", color = "black", se = FALSE) +
+  
+  labs(
+    title = "Fitted vs Residuals (Reduced BGLMM)",
+    x = "Fitted values",
+    y = "Residuals"
+  ) +
+  
+  my_theme
+
+
+#Random Slope
+ggplot(data.frame(
+  fitted = fitted(m_slope),
+  residuals = residuals(m_slope)
+), aes(x = fitted, y = residuals)) +
+  
+  geom_point(alpha = 19, color = "cornflowerblue") +
+  geom_smooth(method = "lm", color = "black", se = FALSE) +
+  
+  labs(
+    title = "Fitted vs Residuals (Random Slope BGLMM)",
+    x = "Fitted values",
+    y = "Residuals"
+  ) +
+  
+  my_theme
+```
+
+
+Figures 10, 11
+```{r}
+library(ggplot2)
+library(patchwork)
+
+#Scatter plots of each audio feature against popularity score
+
+# Custom theme
+my_theme <- theme_minimal() +
+  theme(
+    plot.title = element_text(hjust = 0.5, face = "bold", size = 15),
+
+    axis.text.x  = element_text(color = "black", size = 11, margin = margin(b = 15)),
+    axis.text.y  = element_text(color = "black", size = 11),
+    axis.title   = element_text(color = "black", size = 13),
+
+    legend.background = element_rect(color = "black", linewidth = 0.5, fill = "#f7f7f7"),
+    legend.key        = element_rect(fill = NA, color = NA),
+    legend.text       = element_text(size = 10),
+    legend.title      = element_text(face = "bold"),
+
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+
+    panel.background = element_rect(fill = "#f7f7f7", color = NA),
+    plot.background  = element_rect(fill = "#f7f7f7", color = NA)
+  )
+
+
+p1 <- ggplot(data_songs, aes(x = acousticness, y = popularity_beta)) +
+  geom_point(color = "cornflowerblue") +
+  geom_smooth(method = "lm", color = "indianred1", se = FALSE) +
+  labs(
+    x = "Acousticness",
+    y = "Popularity (0-1)"
+  ) +
+  my_theme
+
+p2 <- ggplot(data_songs, aes(x = danceability, y = popularity_beta)) +
+  geom_point(color = "cornflowerblue") +
+  geom_smooth(method = "lm", color = "indianred1", se = FALSE) +
+  labs(
+    x = "Danceability",
+    y = "Popularity (0-1)"
+  )+
+  my_theme
+
+p3 <- ggplot(data_songs, aes(x = energy, y = popularity_beta)) +
+  geom_point(color = "cornflowerblue") +
+  geom_smooth(method = "lm", color = "indianred1", se = FALSE)+
+  labs(
+    x = "Energy",
+    y = "Popularity (0-1)"
+  )+
+  my_theme
+
+p4 <- ggplot(data_songs, aes(x = liveness, y = popularity_beta)) +
+  geom_point(color = "cornflowerblue") +
+  geom_smooth(method = "lm", color = "indianred1", se = FALSE) +
+  labs(
+    x = "Liveness",
+    y = "Popularity (0-1)"
+  )+
+  my_theme
+
+p5 <- ggplot(data_songs, aes(x = speechiness, y = popularity_beta)) +
+  geom_point(color = "cornflowerblue") +
+  geom_smooth(method = "lm", color = "indianred1", se = FALSE) +
+   labs(
+    x = "Speechiness",
+    y = "Popularity (0-1)"
+  )+
+  my_theme
+
+p6 <- ggplot(data_songs, aes(x = valence, y = popularity_beta)) +
+  geom_point(color = "cornflowerblue") +
+  geom_smooth(method = "lm", color = "indianred1", se = FALSE) +
+   labs(
+    x = "Valence",
+    y = "Popularity (0-1)"
+  )+
+  my_theme
+
+p7 <- ggplot(data_songs, aes(x = loudness_z, y = popularity_beta)) +
+  geom_point(color = "cornflowerblue") +
+  geom_smooth(method = "lm", color = "indianred1", se = FALSE) +
+   labs(
+    x = "Loudness",
+    y = "Popularity (0-1)"
+  )+
+  my_theme
+
+p8 <- ggplot(data_songs, aes(x = tempo_z, y = popularity_beta)) +
+  geom_point(color = "cornflowerblue") +
+  geom_smooth(method = "lm", color = "indianred1", se = FALSE) +
+   labs(
+    x = "Tempo",
+    y = "Popularity (0-1)"
+  )+
+  my_theme
+
+((p1 + p2) / (p3 + p4))  +
+  plot_annotation(
+    title = "Relationship between Audio Features and Popularity",
+    theme = theme(
+      plot.title = element_text(hjust = 0.5, face = "bold", size = 15)
+    )
+  )
+ggsave(
+  filename = "scatter1.png",
+  width    = 8,
+  height   = 6,
+  dpi      = 300,          
+  bg       = "#f7f7f7"     
+)
+  
+ ((p5 + p6) / (p7 + p8)) +
+  plot_annotation(
+    title = "Relationship between Audio Features and Popularity",
+    theme = theme(
+      plot.title = element_text(hjust = 0.5, face = "bold", size = 15)
+    )
+  )
+
+ggsave(
+  filename = "scatter2.png",
+  width    = 8,
+  height   = 6,
+  dpi      = 300,          
+  bg       = "#f7f7f7"     
+)
+
+```
+
+Plots not presented on the paper, but are used complementary to the analysis.
+
+The following two plots are used just to understand intuitively the Random Intercept and Random Slope models.
+```{r}
+library(ggeffects)
+library(ggplot2)
+
+# Generate predictions for the Full BGLMM
+
+pred_intercept_speech <- ggpredict(glmm_beta, terms = c("speechiness", "Genre"), type = "random")
+
+# Random Intercept Model Plot
+plot(pred_intercept_speech) +
+  scale_color_manual(values = c(
+    "Pop"            = "aquamarine2",
+    "Electronic"     = "coral",
+    "Hip hop/ Rap"   = "chartreuse",
+    "Country"        = "#9467bd",
+    "Latin"          = "deeppink",
+    "R&B"            = "darkorange",
+    "Rock"           = "cadetblue",
+    "Easy Listening" = "yellow1"
+  )) +
+  scale_fill_manual(values = c(
+    "Pop"            = "aquamarine2",
+    "Electronic"     = "coral",
+    "Hip hop/ Rap"   = "chartreuse",
+    "Country"        = "#9467bd",
+    "Latin"          = "deeppink",
+    "R&B"            = "darkorange",
+    "Rock"           = "cadetblue",
+    "Easy Listening" = "yellow1"
+  )) +
+  guides(color = guide_legend(override.aes = list(fill = NA))) +
+  labs(
+    title  = "Random Intercept Model",
+    x      = "Speechiness",
+    y      = "Predicted Popularity",
+    colour = "Genre"
+  ) +
+  theme_minimal() +
+ my_theme
+
+#ggsave("random_intercept_model.png", width = 8, height = 5)
+
+
+```
+
+
+```{r}
+
+# Predictions for RS BGLMM
+pred_slope_speech <- ggpredict(m_slope, terms = c("speechiness", "Genre"), type = "random")
+
+#Random Slope Model Predictions for speechiness
+library(ggplot2)
+
+plot(pred_slope_speech) +
+  scale_color_manual(values = c(
+    "Pop"            = "aquamarine2",
+    "Electronic"     = "coral",
+    "Hip hop/ Rap"   = "chartreuse",
+    "Country"        = "#9467bd",
+    "Latin"          = "deeppink",
+    "R&B"            = "darkorange",
+    "Rock"           = "cadetblue",
+    "Easy Listening" = "yellow1"
+  )) +
+  scale_fill_manual(values = c(
+    "Pop"            = "aquamarine2",
+    "Electronic"     = "coral",
+    "Hip hop/ Rap"   = "chartreuse",
+    "Country"        = "#9467bd",
+    "Latin"          = "deeppink",
+    "R&B"            = "darkorange",
+    "Rock"           = "cadetblue",
+    "Easy Listening" = "yellow1"
+  )) +
+  labs(
+    title = "Random Slope Model",
+    x = "Speechiness",
+    y = "Predicted Popularity"
+  ) +
+  guides(color = guide_legend(override.aes = list(fill = NA)))+
+  theme_minimal() +
+  my_theme
+
+ggsave("random_slope.png", width = 8, height = 6, dpi = 300, bg = "#f7f7f7")
+```
+
+
+Plots just to understand the predictive ability of the models.
+```{r}
+library(lattice)
+library(ggplot2)
+
+#Predicted values of the three models
+pred_full <- predict(glmm_beta, type = "response")
+pred_red <- predict(glmm_beta_mode, type = "response")
+pred_slope <- predict(m_slope, type = "response")
+pred_gauss <- predict(glmm_gauss, type = "response")
+
+#Predicted vs Observed Plots
+
+#Full
+ggplot(data.frame(pred = pred_full, obs = data_songs$popularity_beta),
+       aes(x = pred, y = obs)) +
+  
+  geom_point(color = "cornflowerblue", size = 2) +
+  
+  geom_abline(intercept = 0, slope = 1, color = "black", linewidth = 1.2) +
+  
+  labs(
+    title = "Predicted vs Observed Popularity for Full_BGLMM",
+    x = "Predicted values",
+    y = "Observed values"
+  ) +
+  theme_minimal()+
+  my_theme
+
+#Reduced
+ggplot(data.frame(pred = pred_red, obs = data_songs$popularity_beta),
+       aes(x = pred, y = obs)) +
+  
+  geom_point(color = "cornflowerblue", size = 2) +
+  
+  geom_abline(intercept = 0, slope = 1, color = "black", linewidth = 1.2) +
+  
+  labs(
+    title = "Predicted vs Observed Popularity for Reduced_BGLMM",
+    x = "Predicted values",
+    y = "Observed values"
+  ) +
+  theme_minimal()+
+  my_theme
+
+#Random Slope
+ggplot(data.frame(pred = pred_slope, obs = data_songs$popularity_beta),
+       aes(x = pred, y = obs)) +
+  
+  geom_point(color = "cornflowerblue", size = 2) +
+  
+  geom_abline(intercept = 0, slope = 1, color = "black", linewidth = 1.2) +
+  
+  labs(
+    title = "Predicted vs Observed Popularity for RS_BGLMM",
+    x = "Predicted values",
+    y = "Observed values"
+  ) +
+  theme_minimal()+
+  my_theme
+
+#Gaussian GLMM
+ggplot(data.frame(pred = pred_gauss, obs = data_songs$popularity_beta),
+       aes(x = pred, y = obs)) +
+  
+  geom_point(color = "cornflowerblue", size = 2) +
+  
+  geom_abline(intercept = 0, slope = 1, color = "black", linewidth = 1.2) +
+  
+  labs(
+    title = "Predicted vs Observed Popularity for Gaussian GLMM",
+    x = "Predicted values",
+    y = "Observed values"
+  ) +
+  theme_minimal()+
+  my_theme
+
+```
+
+The following plots are used to check the normality of residuals and random effects.
+```{r}
+#Checking normality of residuals using QQ plots
+
+#Full
+res_full <- residuals(glmm_beta)
+
+ggplot(data.frame(res = res_full), aes(sample = res)) +
+  stat_qq(color = "cornflowerblue") +
+  stat_qq_line(color = "black", linewidth = 1) +
+  labs(
+    title = "QQ Plot of Residuals (Full BGLMM)",
+    x = "Theoretical Quantiles",
+    y = "Sample Quantiles"
+  ) +
+  my_theme
+
+res_red <- residuals(glmm_beta_mode)
+
+ggplot(data.frame(res = res_red), aes(sample = res)) +
+  stat_qq(color = "cornflowerblue") +
+  stat_qq_line(color = "black", linewidth = 1) +
+  labs(
+    title = "QQ Plot of Residuals (Reduced BGLMM)",
+    x = "Theoretical Quantiles",
+    y = "Sample Quantiles"
+  ) +
+  my_theme
+
+#Reduced
+res_red <- residuals(glmm_beta_mode)
+
+ggplot(data.frame(res = res_red), aes(sample = res)) +
+  stat_qq(color = "cornflowerblue") +
+  stat_qq_line(color = "black", linewidth = 1) +
+  labs(
+    title = "QQ Plot of Residuals (Reduced BGLMM)",
+    x = "Theoretical Quantiles",
+    y = "Sample Quantiles"
+  ) +
+  my_theme
+
+#Random Slope
+res_red <- residuals(m_slope)
+
+ggplot(data.frame(res = res_red), aes(sample = res)) +
+  stat_qq(color = "cornflowerblue") +
+  stat_qq_line(color = "black", linewidth = 1) +
+  labs(
+    title = "QQ Plot of Residuals (Random Slope BGLMM)",
+    x = "Theoretical Quantiles",
+    y = "Sample Quantiles"
+  ) +
+  my_theme
+```
+
+```{r}
+#Checking normality of random intercepts and random slopes using QQ plots
+
+#Full
+re_full <- ranef(glmm_beta)$cond$Genre[,1]
+
+ggplot(data.frame(re = re_full), aes(sample = re)) +
+  stat_qq(color = "cornflowerblue") +
+  stat_qq_line(color = "black", linewidth = 1) +
+  labs(
+    title = "QQ Plot of Random Intercepts (Full BGLMM)",
+    x = "Theoretical Quantiles",
+    y = "Random Intercepts"
+  ) +
+  my_theme
+
+#Reduced
+re_red <- ranef(glmm_beta_mode)$cond$Genre[,1]
+
+ggplot(data.frame(re = re_full), aes(sample = re)) +
+  stat_qq(color = "cornflowerblue") +
+  stat_qq_line(color = "black", linewidth = 1) +
+  labs(
+    title = "QQ Plot of Random Intercepts (Reduced BGLMM)",
+    x = "Theoretical Quantiles",
+    y = "Random Intercepts"
+  ) +
+  my_theme
+
+#Random Slopes
+re_slope <- ranef(m_slope)$cond$Genre
+intercepts <- re_slope[, "(Intercept)"]
+
+ggplot(data.frame(re = intercepts), aes(sample = re)) +
+  stat_qq(color = "cornflowerblue") +
+  stat_qq_line(color = "black", linewidth = 1) +
+  labs(
+    title = "QQ Plot of Random Intercepts (RS Model)",
+    x = "Theoretical Quantiles",
+    y = "Random Intercepts"
+  ) +
+  my_theme
+
+slopes <- re_slope[, "speechiness"]
+
+ggplot(data.frame(re = slopes), aes(sample = re)) +
+  stat_qq(color = "cornflowerblue") +
+  stat_qq_line(color = "black", linewidth = 1) +
+  labs(
+    title = "QQ Plot of Random Slopes (Speechiness)",
+    x = "Theoretical Quantiles",
+    y = "Random Slopes"
+  ) +
+  my_theme
+```
